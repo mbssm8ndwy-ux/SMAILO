@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: smailo-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /
+    envVars:
+      - key: API_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: LOG_CHAT_ID
+        value: -1003862800881
+      - key: PAYMENT_NOTIFY_CHAT_ID
+        value: -1003862800881
+      - key: SUPPORT_CONTACT
+        value: "@qcryptopay"
+      - key: PROXY_URL
+        value: ""
+
+  - type: cron
+    name: keep-awake
+    schedule: "*/10 * * * *"
+    buildCommand: ""
+    startCommand: /usr/bin/curl -sS $RENDER_EXTERNAL_URL > /dev/null
+    envVars:
