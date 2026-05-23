@@ -403,6 +403,7 @@ ADMIN_IDS = parse_admin_ids()
 
 
 class UserStates(StatesGroup):
+    captcha_wait = State()
     support_wait_text = State()
     order_review_rating = State()
     order_review_text = State()
@@ -924,6 +925,15 @@ async def _finalize_after_balance_payment(
 @dp.message(Command("start"), StateFilter("*"))
 async def start(message: Message, state: FSMContext, command: CommandObject):
     await state.clear()
+    uid = message.from_user.id
+    if not is_admin(uid) and not db.is_captcha_passed(uid):
+        db.upsert_bot_user(uid, message.from_user.username)
+        await state.set_state(UserStates.captcha_wait)
+        await message.answer(
+            "🤖 Подтвердите, что вы не бот.\nНажмите кнопку ниже:",
+            reply_markup=keyboards.captcha_keyboard(),
+        )
+        return
     await send_user_start_log(message)
     if command.args:
         arg = command.args.strip()
@@ -936,6 +946,18 @@ async def start(message: Message, state: FSMContext, command: CommandObject):
     db.upsert_bot_user(message.from_user.id, message.from_user.username)
     await send_welcome(message)
     await send_event_log(message.from_user, "Пользователь запустил бота")
+
+
+@dp.callback_query(F.data == "captcha:verify", StateFilter(UserStates.captcha_wait))
+async def captcha_verify(call: CallbackQuery, state: FSMContext):
+    db.pass_captcha(call.from_user.id)
+    await state.clear()
+    await call.message.edit_text("✅ Проверка пройдена!")
+    db.upsert_bot_user(call.from_user.id, call.from_user.username)
+    await send_welcome(call.message)
+    await call.answer()
+    await send_user_start_log(call.message)
+    await send_event_log(call.from_user, "Пользователь прошёл капчу")
 
 
 @dp.message(Command("cancel"), StateFilter("*"))

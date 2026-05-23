@@ -205,6 +205,7 @@ class Database:
         self._migrate_to_assortments_model(conn)
         self._migrate_product_qty_columns(conn)
         self._migrate_drop_product_title_unique(conn)
+        self._migrate_captcha_column(conn)
 
     def _migrate_product_qty_columns(self, conn) -> None:
         cur = conn.cursor()
@@ -1247,6 +1248,29 @@ class Database:
             )
             conn.commit()
             return cur.rowcount > 0
+
+    def _migrate_captcha_column(self, conn) -> None:
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(bot_users)")
+        cols = [row[1] for row in cur.fetchall()]
+        if "captcha_passed" not in cols:
+            cur.execute("ALTER TABLE bot_users ADD COLUMN captcha_passed INTEGER NOT NULL DEFAULT 0")
+
+    def is_captcha_passed(self, user_id: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT captcha_passed FROM bot_users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            return bool(row and int(row["captcha_passed"]))
+
+    def pass_captcha(self, user_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE bot_users SET captcha_passed = 1 WHERE user_id = ?",
+                (user_id,),
+            )
+            conn.commit()
 
     def upsert_bot_user(self, user_id: int, username: Optional[str] = None) -> None:
         with self._connect() as conn:

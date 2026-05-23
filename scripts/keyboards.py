@@ -1,8 +1,14 @@
-from aiogram.types import InlineKeyboardButton, KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 CATALOG_NAMES_PER_PAGE = 20
 BTN_BACK = "« Вернуться назад"
+
+
+def captcha_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🤖 Я не бот", callback_data="captcha:verify")
+    return kb.as_markup()
 
 
 def main_menu(is_admin: bool) -> ReplyKeyboardMarkup:
