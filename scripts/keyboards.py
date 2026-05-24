@@ -53,7 +53,6 @@ def catalog_assortment_keyboard(names: list, page: int):
     if nav_row:
         kb.row(*nav_row)
     kb.row(InlineKeyboardButton(text="💼 Работа", callback_data="nav:work"))
-    kb.row(InlineKeyboardButton(text="📩 Создать тикет", callback_data="nav:ticket"))
     kb.row(InlineKeyboardButton(text=BTN_BACK, callback_data="nav:x"))
     return kb.as_markup()
 

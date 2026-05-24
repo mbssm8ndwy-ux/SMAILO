@@ -1075,15 +1075,6 @@ async def catalog_navigation(call: CallbackQuery, state: FSMContext):
         await call.answer()
         return
 
-    if op == "ticket":
-        contact = shop_support_contact()
-        await call.message.edit_text(
-            f"📩 Для создания тикета напишите боту поддержки:\n{contact}\n\n"
-            "Там выберите категорию и опишите вопрос."
-        )
-        await call.answer()
-        return
-
     if op == "z":
         await call.answer()
         return
