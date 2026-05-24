@@ -181,10 +181,27 @@ async def close_ticket(call: CallbackQuery):
 async def log_reply_to_user(message: Message):
     replied_text = message.reply_to_message.text or message.reply_to_message.caption or ""
     m = re.search(r"(?:ID|UID):\s*(\d+)", replied_text)
-    if m:
-        await message.reply("↩️ Ответ доставится через основной бот SMAILO.")
-    else:
+    if not m:
         await message.reply("❌ Не найден ID пользователя в сообщении.")
+        return
+
+    user_id = int(m.group(1))
+    text = message.text or message.caption or ""
+    if not text and not message.photo and not message.video:
+        await message.reply("❌ Пустой ответ.")
+        return
+
+    try:
+        if message.photo:
+            await bot.send_photo(user_id, message.photo[-1].file_id, caption=f"💬 Ответ поддержки:\n\n{text}" if text else "💬 Ответ поддержки")
+        elif message.video:
+            await bot.send_video(user_id, message.video.file_id, caption=f"💬 Ответ поддержки:\n\n{text}" if text else "💬 Ответ поддержки")
+        else:
+            await bot.send_message(user_id, f"💬 Ответ поддержки:\n\n{text}")
+        await message.reply("✅ Ответ отправлен.")
+    except Exception as e:
+        logging.exception("support_bot: failed to send reply to user %s", user_id)
+        await message.reply(f"❌ Ошибка отправки: {e}")
 
 
 async def run_support_bot():
