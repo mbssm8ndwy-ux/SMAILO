@@ -295,6 +295,7 @@ def admin_menu():
     kb.button(text="📄 Список", callback_data="admin:list")
     kb.button(text="📣 Рассылка", callback_data="admin:broadcast")
     kb.button(text="👥 База и рефералы", callback_data="admin:userbase")
+    kb.button(text="🎫 Промокоды", callback_data="admin:promos")
     kb.adjust(2)
     return kb.as_markup()
 
@@ -376,6 +377,26 @@ def payments_hub():
     return kb.as_markup()
 
 
+def admin_promos_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Создать промокод", callback_data="admin:promo_add")
+    kb.button(text="📋 Список промокодов", callback_data="admin:promo_list")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def admin_promo_list_keyboard(promos: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for p in promos:
+        status = "✅" if p["is_active"] else "❌"
+        used = f"{p['current_uses']}/{p['max_uses']}" if p['max_uses'] > 0 else f"{p['current_uses']}/∞"
+        label = f"{status} {p['code']} -{p['discount_percent']}% ({used})"
+        kb.button(text=label, callback_data=f"admin:promo_toggle:{p['id']}")
+    kb.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin:promos"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def broadcast_confirm_markup():
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Разослать всем", callback_data="bcst:go")
@@ -389,6 +410,14 @@ def admin_balance_hub():
     kb.button(text="➕ Зачислить на баланс", callback_data="admin:bal_credit")
     kb.button(text="➖ Списать с баланса", callback_data="admin:bal_debit")
     kb.button(text="🔍 Узнать баланс", callback_data="admin:bal_lookup")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def promo_ask_keyboard(product_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🎫 Ввести промокод", callback_data=f"promo:enter:{product_id}")
+    kb.button(text="➡️ Продолжить без промо", callback_data=f"promo:skip:{product_id}")
     kb.adjust(1)
     return kb.as_markup()
 

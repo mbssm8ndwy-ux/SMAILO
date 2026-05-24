@@ -206,6 +206,7 @@ class Database:
         self._migrate_product_qty_columns(conn)
         self._migrate_drop_product_title_unique(conn)
         self._migrate_captcha_column(conn)
+        self._migrate_promocodes(conn)
 
     def _migrate_product_qty_columns(self, conn) -> None:
         cur = conn.cursor()
@@ -1256,6 +1257,94 @@ class Database:
         if "captcha_passed" not in cols:
             cur.execute("ALTER TABLE bot_users ADD COLUMN captcha_passed INTEGER NOT NULL DEFAULT 0")
 
+    def _migrate_promocodes(self, conn) -> None:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS promocodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT UNIQUE NOT NULL,
+                discount_percent INTEGER NOT NULL,
+                max_uses INTEGER NOT NULL DEFAULT 0,
+                current_uses INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("PRAGMA table_info(orders)")
+        cols = [row[1] for row in cur.fetchall()]
+        if "promo_code" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN promo_code TEXT")
+        if "discount_amount" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN discount_amount REAL DEFAULT 0")
+
+    def create_promo(self, code: str, discount_percent: int, max_uses: int = 0) -> bool:
+        code = code.strip().upper()
+        if not code or discount_percent < 1 or discount_percent > 100:
+            return False
+        with self._connect() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO promocodes(code, discount_percent, max_uses) VALUES (?, ?, ?)",
+                    (code, discount_percent, max_uses),
+                )
+                conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
+    def get_promo(self, code: str) -> Optional[Dict]:
+        code = code.strip().upper()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM promocodes WHERE code = ? AND is_active = 1",
+                (code,),
+            ).fetchone()
+            if not row:
+                return None
+            promo = dict(row)
+            if promo["max_uses"] > 0 and promo["current_uses"] >= promo["max_uses"]:
+                return None
+            return promo
+
+    def use_promo(self, code: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, max_uses, current_uses FROM promocodes WHERE code = ? AND is_active = 1",
+                (code.strip().upper(),),
+            ).fetchone()
+            if not row:
+                return False
+            if row["max_uses"] > 0 and row["current_uses"] >= row["max_uses"]:
+                return False
+            conn.execute(
+                "UPDATE promocodes SET current_uses = current_uses + 1 WHERE id = ?",
+                (row["id"],),
+            )
+            conn.commit()
+            return True
+
+    def list_promos(self) -> List[Dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM promocodes ORDER BY id DESC"
+            ).fetchall()
+            return self._rows_to_dicts(rows)
+
+    def toggle_promo(self, promo_id: int) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE promocodes SET is_active = CASE WHEN is_active THEN 0 ELSE 1 END WHERE id = ?",
+                (promo_id,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def delete_promo(self, promo_id: int) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM promocodes WHERE id = ?", (promo_id,))
+            conn.commit()
+            return cur.rowcount > 0
+
     def is_captcha_passed(self, user_id: int) -> bool:
         with self._connect() as conn:
             row = conn.execute(
@@ -1313,6 +1402,15 @@ class Database:
                 ),
                 "balance_rows": scalar("SELECT COUNT(*) FROM user_balances"),
             }
+
+    def set_order_promo(self, order_id: int, promo_code: str, discount_amount: float) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE orders SET promo_code = ?, discount_amount = ? WHERE id = ?",
+                (promo_code, round(discount_amount, 2), order_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
 
     def list_bot_user_ids(self) -> List[int]:
         with self._connect() as conn:

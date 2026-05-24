@@ -407,6 +407,7 @@ class UserStates(StatesGroup):
     support_wait_text = State()
     order_review_rating = State()
     order_review_text = State()
+    promo_enter = State()
 
 
 class AdminStates(StatesGroup):
@@ -438,6 +439,9 @@ class AdminStates(StatesGroup):
     add_assortment_name = State()
     broadcast_compose = State()
     broadcast_confirm = State()
+    promo_add_name = State()
+    promo_add_percent = State()
+    promo_add_uses = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -448,6 +452,9 @@ def _is_log_chat_message(message: Message) -> bool:
     if not getattr(config, "LOG_CHAT_ID", None):
         return False
     return message.chat.id == int(config.LOG_CHAT_ID)
+
+
+_promo_cache: dict[int, dict] = {}
 
 
 _BROADCAST_SKIP_CONTENT = frozenset(
@@ -1283,47 +1290,100 @@ async def back_to_product_card(call: CallbackQuery):
 
 
 @dp.callback_query(F.data.startswith("pay:"))
-async def pay_offer_methods(call: CallbackQuery):
+async def pay_ask_promo(call: CallbackQuery):
     product_id = int(call.data.split(":")[1])
     product = db.get_product(product_id)
     if not product:
         await call.answer("Позиция не найдена", show_alert=True)
         return
+    text = (
+        f"📂 {product['assortment_name']}\n"
+        f"📌 {product['title']}\n"
+        f"📏 {_format_qty_line(product)}\n"
+        f"💰 Цена: {product['price']:.2f} RUB\n\n"
+        "🎫 У вас есть промокод?"
+    )
+    await call.message.edit_text(text, reply_markup=keyboards.promo_ask_keyboard(product_id))
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("promo:skip:"))
+async def promo_skip(call: CallbackQuery):
+    product_id = int(call.data.split(":")[2])
+    _promo_cache.pop(call.from_user.id, None)
+    await pay_offer_methods_after_promo(call, product_id, 0, None)
+
+
+@dp.callback_query(F.data.startswith("promo:enter:"))
+async def promo_enter_ask(call: CallbackQuery, state: FSMContext):
+    product_id = int(call.data.split(":")[2])
+    await state.set_state(UserStates.promo_enter)
+    await state.update_data(promo_product_id=product_id)
+    await call.message.edit_text("🎫 Введите промокод:")
+    await call.answer()
+
+
+@dp.message(StateFilter(UserStates.promo_enter))
+async def promo_enter_text(message: Message, state: FSMContext):
+    code = message.text.strip().upper()
+    promo = db.get_promo(code)
+    if not promo:
+        await message.answer("❌ Промокод не найден или истёк. Попробуйте другой или нажмите /cancel.")
+        return
+    data = await state.get_data()
+    product_id = data.get("promo_product_id")
+    await state.clear()
+    product = db.get_product(product_id)
+    if not product:
+        await message.answer("Позиция не найдена")
+        return
+    discount_pct = int(promo["discount_percent"])
+    _promo_cache[message.from_user.id] = {
+        "product_id": product_id,
+        "promo_code": promo["code"],
+        "discount_percent": discount_pct,
+    }
+    await pay_offer_methods_after_promo(message, product_id, discount_pct, promo["code"])
+
+
+async def pay_offer_methods_after_promo(obj, product_id: int, discount_pct: int, promo_code: Optional[str]):
+    product = db.get_product(product_id)
+    if not product:
+        text = "Позиция не найдена"
+        await (obj.answer(text) if isinstance(obj, Message) else obj.answer(text, show_alert=True))
+        return
     district = db.get_district(product["district_id"])
     city = db.get_city(district["city_id"]) if district else None
-    bal = db.get_user_balance(call.from_user.id)
+    bal = db.get_user_balance(obj.from_user.id)
     price = float(product["price"])
-    show_bal = bal + 1e-9 >= price
+    discount = price * discount_pct / 100 if discount_pct > 0 else 0
+    final_price = price - discount
+    show_bal = bal + 1e-9 >= final_price
     show_usdt = bool(shop_crypto_usdt_trc20())
     show_btc = bool(shop_crypto_btc())
+    promo_line = f"\n🎫 Промокод: {promo_code} (-{discount_pct}%)" if promo_code else ""
     text = (
         f"📂 {product['assortment_name']}\n"
         f"📌 {product['title']}\n"
         f"📏 {_format_qty_line(product)}\n"
         f"Город: {city['name'] if city else '-'}\n"
         f"Район: {district['name'] if district else '-'}\n"
-        f"💰 К оплате: {price:.2f} RUB\n"
+        f"💰 Цена: {price:.2f} RUB"
+        f"{promo_line}"
+        f"\n💵 Итого: {final_price:.2f} RUB\n"
         f"💎 На балансе: {bal:.2f} ₽\n\n"
         "Выберите способ оплаты."
-        + (
-            "\n💰 С баланса — мгновенное списание."
-            if show_bal
-            else "\nПополните баланс в «Мой кабинет», если не хватает средств."
-        )
+        + ("\n💰 С баланса — мгновенное списание." if show_bal
+           else "\nПополните баланс в «Мой кабинет», если не хватает средств.")
     )
-    await call.message.edit_text(
-        text,
-        reply_markup=keyboards.pay_method_keyboard(
-            product_id,
-            show_balance=show_bal,
-            show_usdt=show_usdt,
-            show_btc=show_btc,
-        ),
-    )
-    await call.answer()
+    target = obj.message if not isinstance(obj, Message) else obj
+    await target.edit_text(text, reply_markup=keyboards.pay_method_keyboard(
+        product_id, show_balance=show_bal, show_usdt=show_usdt, show_btc=show_btc,
+    ))
     await send_event_log(
-        call.from_user,
-        f"Пользователь открыл оплату: {_product_label(product)} ({product['price']:.2f} RUB)",
+        obj.from_user,
+        f"Оплата: {_product_label(product)} ({price:.2f} RUB)"
+        + (f", промо {promo_code} (-{discount_pct}%)" if promo_code else ""),
     )
 
 
@@ -1339,10 +1399,19 @@ async def pay_show_requisites(call: CallbackQuery):
     if not product:
         await call.answer("Позиция не найдена", show_alert=True)
         return
-    amount = float(product["price"])
+    uid = call.from_user.id
+    promo_info = _promo_cache.pop(uid, None)
+    discount_pct = 0
+    promo_code = None
+    if promo_info and promo_info.get("product_id") == product_id:
+        discount_pct = promo_info.get("discount_percent", 0)
+        promo_code = promo_info.get("promo_code")
+    price = float(product["price"])
+    discount = price * discount_pct / 100 if discount_pct > 0 else 0
+    amount = price - discount
     if method == "balance":
         order_id = db.create_order_paid_by_balance(
-            user_id=call.from_user.id,
+            user_id=uid,
             username=call.from_user.username,
             chat_id=call.message.chat.id,
             product_id=product_id,
@@ -1351,9 +1420,13 @@ async def pay_show_requisites(call: CallbackQuery):
         if order_id is None:
             await call.answer("Недостаточно средств на балансе", show_alert=True)
             return
+        if promo_code:
+            db.use_promo(promo_code)
+            db.set_order_promo(order_id, promo_code, discount)
         await send_event_log(
             call.from_user,
-            f"Заказ #{order_id}: оплата с баланса «{_product_label(product)}», {amount:.2f} RUB",
+            f"Заказ #{order_id}: оплата с баланса «{_product_label(product)}», {amount:.2f} RUB"
+            + (f" (промо {promo_code} -{discount_pct}%)" if promo_code else ""),
         )
         await _finalize_after_balance_payment(call, order_id, product)
         return
@@ -1391,7 +1464,7 @@ async def pay_show_requisites(call: CallbackQuery):
         )
         return
     order_id = db.create_order(
-        user_id=call.from_user.id,
+        user_id=uid,
         username=call.from_user.username,
         chat_id=call.message.chat.id,
         product_id=product_id,
@@ -1401,10 +1474,16 @@ async def pay_show_requisites(call: CallbackQuery):
         amount=amount,
         status="awaiting_payment",
     )
+    if promo_code:
+        db.use_promo(promo_code)
+        db.set_order_promo(order_id, promo_code, discount)
+    promo_line_banner = f"\n🎫 Промокод: {promo_code} (-{discount_pct}%)" if promo_code else ""
     text = (
         f"{header}\n\n"
         f"📦 {_product_label(product)}\n"
-        f"💰 Сумма: {amount:.2f} RUB\n\n"
+        f"💰 Цена: {price:.2f} RUB"
+        f"{promo_line_banner}"
+        f"\n💵 К оплате: {amount:.2f} RUB\n\n"
         f"Реквизит:\n{requisite_line}\n\n"
         "После перевода нажмите «Я оплатил». "
         f"Вопросы: {shop_support_contact()}"
@@ -2368,6 +2447,95 @@ async def admin_userbase_info(call: CallbackQuery):
         "«кто пришёл» и «чей это реферал»."
     )
     await call.message.answer(text)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "admin:promos")
+async def admin_promos_menu(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    await call.message.answer("🎫 Управление промокодами", reply_markup=keyboards.admin_promos_keyboard())
+    await call.answer()
+
+
+@dp.callback_query(F.data == "admin:promo_add")
+async def admin_promo_add_start(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    await state.set_state(AdminStates.promo_add_name)
+    await call.message.answer("Введите название промокода (буквы и цифры, например: SALE10):")
+    await call.answer()
+
+
+@dp.message(StateFilter(AdminStates.promo_add_name))
+async def admin_promo_add_name(message: Message, state: FSMContext):
+    code = message.text.strip().upper()
+    if not code or len(code) > 20:
+        await message.answer("Некорректный код. Максимум 20 символов. Попробуйте снова или /cancel.")
+        return
+    await state.update_data(promo_code=code)
+    await state.set_state(AdminStates.promo_add_percent)
+    await message.answer("Введите процент скидки (от 1 до 100):")
+
+
+@dp.message(StateFilter(AdminStates.promo_add_percent))
+async def admin_promo_add_percent(message: Message, state: FSMContext):
+    try:
+        pct = int(message.text.strip())
+        if pct < 1 or pct > 100:
+            raise ValueError
+    except ValueError:
+        await message.answer("Введите число от 1 до 100. Попробуйте снова или /cancel.")
+        return
+    await state.update_data(promo_percent=pct)
+    await state.set_state(AdminStates.promo_add_uses)
+    await message.answer("Максимальное количество использований (0 — без лимита):")
+
+
+@dp.message(StateFilter(AdminStates.promo_add_uses))
+async def admin_promo_add_uses(message: Message, state: FSMContext):
+    try:
+        max_uses = int(message.text.strip())
+        if max_uses < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("Введите число >= 0. 0 — без лимита. Попробуйте снова или /cancel.")
+        return
+    data = await state.get_data()
+    code = data["promo_code"]
+    pct = data["promo_percent"]
+    if db.create_promo(code, pct, max_uses):
+        await message.answer(f"✅ Промокод {code} создан: -{pct}%, лимит: {'∞' if max_uses == 0 else max_uses}")
+    else:
+        await message.answer("❌ Ошибка: такой промокод уже существует.")
+    await state.clear()
+
+
+@dp.callback_query(F.data == "admin:promo_list")
+async def admin_promo_list(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    promos = db.list_promos()
+    if not promos:
+        await call.message.answer("Нет промокодов.")
+        await call.answer()
+        return
+    await call.message.answer("Список промокодов (нажмите чтобы вкл/выкл или удалить):", reply_markup=keyboards.admin_promo_list_keyboard(promos))
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("admin:promo_toggle:"))
+async def admin_promo_toggle(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    promo_id = int(call.data.split(":")[2])
+    db.toggle_promo(promo_id)
+    promos = db.list_promos()
+    await call.message.edit_text("✅ Статус изменён.", reply_markup=keyboards.admin_promo_list_keyboard(promos))
     await call.answer()
 
 
