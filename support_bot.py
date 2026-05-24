@@ -26,6 +26,8 @@ _ticket_map: dict[int, dict] = {}
 _user_ticket: dict[int, int] = {}
 # user_id -> pending category (before first message sent)
 _pending_category: dict[int, str] = {}
+# user_id -> last category used (for auto-reopen after close)
+_last_category: dict[int, str] = {}
 
 CATEGORIES = {
     "ticket:q": "❓ Вопрос",
@@ -119,6 +121,8 @@ async def user_message_handler(message: Message):
     # No open ticket — check if user selected a category
     category = _pending_category.pop(user.id, None)
     if not category:
+        category = _last_category.get(user.id)
+    if not category:
         await message.answer(
             "📩 Сначала выберите категорию тикета:",
             reply_markup=_categories_keyboard(),
@@ -161,6 +165,7 @@ async def close_ticket(call: CallbackQuery):
         return
     ticket["status"] = "closed"
     user_id = ticket["user_id"]
+    _last_category[user_id] = ticket["category"]
     if _user_ticket.get(user_id) == msg_id:
         del _user_ticket[user_id]
     try:
