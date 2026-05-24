@@ -1276,6 +1276,7 @@ async def catalog_navigation(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("bprd:"))
 async def back_to_product_card(call: CallbackQuery):
+    _promo_cache.pop(call.from_user.id, None)
     product_id = int(call.data.split(":")[1])
     content = _product_card_content(
         product_id,
@@ -1291,6 +1292,7 @@ async def back_to_product_card(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("pay:"))
 async def pay_ask_promo(call: CallbackQuery):
+    _promo_cache.pop(call.from_user.id, None)
     product_id = int(call.data.split(":")[1])
     product = db.get_product(product_id)
     if not product:
