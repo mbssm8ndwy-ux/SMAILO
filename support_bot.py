@@ -11,6 +11,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import config
+from db import Database
 
 SUPPORT_BOT_TOKEN = "8878588955:AAEFxn-Mm2-Qc8HnKnyVzBgQKmIR3WkAYvw"
 
@@ -19,6 +20,7 @@ bot = Bot(token=SUPPORT_BOT_TOKEN, session=session) if session else Bot(token=SU
 dp = Dispatcher(storage=MemoryStorage())
 
 LOG_CHAT_ID = int(config.LOG_CHAT_ID)
+db = Database()
 
 # log_msg_id -> {"user_id", "category", "status"}
 _ticket_map: dict[int, dict] = {}
@@ -70,6 +72,21 @@ async def cmd_cancel(message: Message):
 @dp.message(Command("ping"))
 async def cmd_ping(message: Message):
     await message.answer("pong")
+
+
+@dp.message(Command("tickets"))
+async def cmd_tickets(message: Message):
+    tickets = db.get_user_support_bot_tickets(message.from_user.id)
+    if not tickets:
+        await message.answer("У вас нет тикетов.")
+        return
+    lines = []
+    for t in tickets:
+        status = "🟢 Открыт" if t["status"] == "open" else "🔴 Закрыт"
+        created = t["created_at"][:16] if t["created_at"] else "?"
+        closed = t["closed_at"][:16] if t.get("closed_at") else "—"
+        lines.append(f"{status} | {t['category']} | 📅 {created} | ❌ {closed}")
+    await message.answer("📋 **Ваши тикеты:**\n\n" + "\n".join(lines))
 
 
 @dp.callback_query(F.data.startswith("ticket:"))
@@ -141,14 +158,14 @@ async def user_message_handler(message: Message):
         "👇 Кнопка «Закрыть» — когда вопрос решён."
     )
 
-    try:
-        sent = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
-        sent_msg_id = sent.message_id
-        await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
-        _ticket_map[sent_msg_id] = {"user_id": user.id, "category": category, "status": "open"}
-        _user_ticket[user.id] = sent_msg_id
-    except Exception:
-        logging.exception("support_bot: failed to send ticket to log chat")
+        try:
+            sent = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
+            sent_msg_id = sent.message_id
+            await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
+            _ticket_map[sent_msg_id] = {"user_id": user.id, "category": category, "status": "open", "db_id": db.add_support_bot_ticket(user.id, category)}
+            _user_ticket[user.id] = sent_msg_id
+        except Exception:
+            logging.exception("support_bot: failed to send ticket to log chat")
 
     await message.answer("⏳ Ваше обращение принято. Ожидайте ответа — вам ответят в порядке очереди.")
 
@@ -168,6 +185,9 @@ async def close_ticket(call: CallbackQuery):
     _last_category[user_id] = ticket["category"]
     if _user_ticket.get(user_id) == msg_id:
         del _user_ticket[user_id]
+    db_id = ticket.get("db_id")
+    if db_id:
+        db.close_support_bot_ticket(db_id)
     try:
         await call.message.edit_reply_markup(reply_markup=None)
     except Exception:

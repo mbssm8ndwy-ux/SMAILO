@@ -180,6 +180,18 @@ class Database:
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS support_bot_tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                closed_at TEXT
+            )
+            """
+        )
         for _sql in (
             "INSERT OR IGNORE INTO bot_users(user_id) SELECT DISTINCT user_id FROM orders",
             "INSERT OR IGNORE INTO bot_users(user_id) SELECT DISTINCT invited_user_id FROM referrals",
@@ -1118,6 +1130,37 @@ class Database:
                 (log_message_id,),
             ).fetchone()
             return int(row["user_id"]) if row else None
+
+    def add_support_bot_ticket(self, user_id: int, category: str) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO support_bot_tickets(user_id, category, status) VALUES (?, ?, 'open')",
+                (user_id, category),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+
+    def close_support_bot_ticket(self, ticket_id: int) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE support_bot_tickets SET status = 'closed', closed_at = datetime('now') WHERE id = ?",
+                (ticket_id,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def get_user_support_bot_tickets(self, user_id: int) -> List[Dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, category, status, created_at, closed_at
+                FROM support_bot_tickets
+                WHERE user_id = ?
+                ORDER BY id DESC
+                """,
+                (user_id,),
+            ).fetchall()
+            return self._rows_to_dicts(rows)
 
     def try_register_referral(self, invited_user_id: int, referrer_id: int) -> bool:
         if invited_user_id == referrer_id or referrer_id <= 0:
