@@ -31,6 +31,7 @@ from db import MAX_PAYMENT_CARDS, MAX_PAYMENT_SBP, Database
 from scripts import keyboards
 
 BOT_START_TIME = datetime.now()
+_BOT_USERNAME: str | None = None
 LOCAL_PORT = int(os.environ.get("PORT", 12337))
 
 
@@ -84,7 +85,7 @@ DEFAULT_WELCOME_TEXT = (
 
 
 def shop_support_contact() -> str:
-    return "@qcryptopay"
+    return _BOT_USERNAME or "@qcryptopay"
 
 
 def shop_rules_text() -> str:
@@ -96,8 +97,7 @@ def shop_about_text() -> str:
 
 
 def shop_payment_support() -> str:
-    # Фиксированный контакт по платежам по запросу владельца.
-    return "@qcryptopay"
+    return _BOT_USERNAME or "@qcryptopay"
 
 
 def shop_reviews_text() -> str:
@@ -2448,10 +2448,12 @@ async def work_city_non_text(message: Message):
 
 
 @dp.callback_query(F.data == "work:operator")
-async def work_operator(call: CallbackQuery):
+async def work_operator(call: CallbackQuery, state: FSMContext):
     _work_cache.pop(call.from_user.id, None)
+    await state.set_state(UserStates.support_wait_text)
+    await state.update_data(support_topic="Работа", support_context="связь с оператором")
     await call.message.edit_text(
-        "📞 Свяжитесь с оператором:\n\n" + shop_support_contact()
+        "📞 Опишите ваш вопрос или предложение, и оператор свяжется с вами:\n/cancel — отмена."
     )
     await call.answer()
 
@@ -4150,6 +4152,17 @@ async def handle_info(request):
 app = web.Application()
 app.router.add_get("/", handle_info)
 app.router.add_get("/info", handle_info)
+
+
+@dp.startup()
+async def on_startup() -> None:
+    global _BOT_USERNAME
+    try:
+        me = await bot.get_me()
+        _BOT_USERNAME = f"@{me.username}" if me and me.username else None
+        logging.info("Bot username: %s", _BOT_USERNAME)
+    except Exception:
+        logging.exception("Failed to get bot username")
 
 
 async def main() -> None:
