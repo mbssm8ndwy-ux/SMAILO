@@ -1378,10 +1378,14 @@ async def pay_offer_methods_after_promo(obj, product_id: int, discount_pct: int,
         + ("\n💰 С баланса — мгновенное списание." if show_bal
            else "\nПополните баланс в «Мой кабинет», если не хватает средств.")
     )
-    target = obj.message if not isinstance(obj, Message) else obj
-    await target.edit_text(text, reply_markup=keyboards.pay_method_keyboard(
-        product_id, show_balance=show_bal, show_usdt=show_usdt, show_btc=show_btc,
-    ))
+    if isinstance(obj, Message):
+        await obj.answer(text, reply_markup=keyboards.pay_method_keyboard(
+            product_id, show_balance=show_bal, show_usdt=show_usdt, show_btc=show_btc,
+        ))
+    else:
+        await obj.message.edit_text(text, reply_markup=keyboards.pay_method_keyboard(
+            product_id, show_balance=show_bal, show_usdt=show_usdt, show_btc=show_btc,
+        ))
     await send_event_log(
         obj.from_user,
         f"Оплата: {_product_label(product)} ({price:.2f} RUB)"
