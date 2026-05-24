@@ -167,17 +167,20 @@ async def close_ticket(call: CallbackQuery):
 @dp.message(F.chat.id == LOG_CHAT_ID, F.reply_to_message)
 async def log_reply_to_user(message: Message):
     replied_id = message.reply_to_message.message_id
+    replied_text = message.reply_to_message.text or message.reply_to_message.caption or ""
+    logging.info("log_reply: replied_id=%s, chat_id=%s, text=%s", replied_id, message.chat.id, (message.text or "")[:50])
+
     ticket = _ticket_map.get(replied_id)
     if not ticket:
-        # Try to extract user ID from the replied message text
-        replied_text = message.reply_to_message.text or message.reply_to_message.caption or ""
-        m = re.search(r"ID:\s*(\d+)", replied_text)
+        # Try to extract user ID from replied message (supports both "ID: 123" and "UID:123")
+        m = re.search(r"(?:ID|UID):\s*(\d+)", replied_text)
         if m:
             uid = int(m.group(1))
             ticket = {"user_id": uid, "category": "?", "status": "open"}
             _ticket_map[replied_id] = ticket
+            logging.info("log_reply: recovered ticket for user %s from replied text", uid)
         else:
-            await message.reply("❌ Пользователь не найден (тикет сброшен при перезапуске).")
+            await message.reply("❌ Пользователь не найден (тикет сброшен при перезапуске). Бот поддержки должен быть добавлен в этот чат.")
             return
     if ticket["status"] == "closed":
         await message.reply("❌ Тикет уже закрыт.")
@@ -196,7 +199,8 @@ async def log_reply_to_user(message: Message):
             await bot.send_message(user_id, f"💬 Ответ поддержки:\n\n{text}")
         await message.reply("✅ Ответ отправлен.")
     except Exception as e:
-        await message.reply(f"❌ Ошибка: {e}")
+        await message.reply(f"❌ Ошибка отправки пользователю {user_id}: {e}")
+        logging.exception("log_reply: send failed for user %s", user_id)
 
 
 async def run_support_bot():
