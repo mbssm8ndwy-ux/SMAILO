@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -102,7 +103,7 @@ async def user_message_handler(message: Message):
             sent = await bot.send_message(cid, text)
             _ticket_map[sent.message_id] = {"user_id": user.id, "category": ticket["category"], "status": "open"}
             _user_ticket[user.id] = sent.message_id
-            await message.answer("✅ Сообщение добавлено в ваш тикет.")
+            await message.answer("⏳ Сообщение добавлено. Ожидайте ответа.")
             return
 
     # No open ticket — check if user selected a category
@@ -132,7 +133,7 @@ async def user_message_handler(message: Message):
 
     _ticket_map[sent_msg_id] = {"user_id": user.id, "category": category, "status": "open"}
     _user_ticket[user.id] = sent_msg_id
-    await message.answer("✅ Тикет создан. Ответ придёт сюда.")
+    await message.answer("⏳ Ваше обращение принято. Ожидайте ответа — вам ответят в порядке очереди.")
 
 
 @dp.callback_query(F.data.startswith("closeticket:"))
@@ -168,8 +169,16 @@ async def log_reply_to_user(message: Message):
     replied_id = message.reply_to_message.message_id
     ticket = _ticket_map.get(replied_id)
     if not ticket:
-        await message.reply("❌ Пользователь не найден (тикет сброшен при перезапуске).")
-        return
+        # Try to extract user ID from the replied message text
+        replied_text = message.reply_to_message.text or message.reply_to_message.caption or ""
+        m = re.search(r"ID:\s*(\d+)", replied_text)
+        if m:
+            uid = int(m.group(1))
+            ticket = {"user_id": uid, "category": "?", "status": "open"}
+            _ticket_map[replied_id] = ticket
+        else:
+            await message.reply("❌ Пользователь не найден (тикет сброшен при перезапуске).")
+            return
     if ticket["status"] == "closed":
         await message.reply("❌ Тикет уже закрыт.")
         return
