@@ -2,7 +2,7 @@ import os
 
 # Telegram bot token
 API_TOKEN = os.environ.get("API_TOKEN", "8794787592:AAGmHgGBN-g7FnoJkcVKiAfJB1o2cSLC_5U")
-PROXY_URL = os.environ.get("PROXY_URL", "socks5://127.0.0.1:12334")
+PROXY_URL = os.environ.get("PROXY_URL", "").strip()
 
 # Comma-separated list of admin Telegram user IDs.
 ADMIN_IDS = os.environ.get("ADMIN_IDS", "7998704133")
