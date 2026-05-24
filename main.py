@@ -1866,19 +1866,25 @@ async def support_admin_reply_from_log(message: Message):
         return
     uid = db.get_support_ticket_user(int(message.reply_to_message.message_id))
     if uid is None:
-        m = re.search(r"UID:(\d+)", message.reply_to_message.text)
+        replied_text = message.reply_to_message.text or message.reply_to_message.caption or ""
+        m = re.search(r"(?:UID|ID):\s*(\d+)", replied_text)
         if not m:
             return
         uid = int(m.group(1))
-    text = (message.text or "").strip()
-    if not text:
+    text = (message.text or message.caption or "").strip()
+    if not text and not message.photo and not message.video:
         return
     try:
-        await bot.send_message(uid, "💬 Ответ поддержки:\n\n" + text)
-        await message.reply("Ответ отправлен пользователю.")
+        if message.photo:
+            await bot.send_photo(uid, message.photo[-1].file_id, caption=f"💬 Ответ поддержки:\n\n{text}" if text else "💬 Ответ поддержки")
+        elif message.video:
+            await bot.send_video(uid, message.video.file_id, caption=f"💬 Ответ поддержки:\n\n{text}" if text else "💬 Ответ поддержки")
+        else:
+            await bot.send_message(uid, f"💬 Ответ поддержки:\n\n{text}")
+        await message.reply("✅ Ответ отправлен.")
     except Exception:
         logging.exception("Failed to send support reply to uid=%s", uid)
-        await message.reply("Не удалось отправить ответ пользователю.")
+        await message.reply("❌ Не удалось отправить ответ пользователю.")
 
 
 @dp.message(F.text.in_({"Поддержка по платежам", "💳 Поддержка по платежам"}))
