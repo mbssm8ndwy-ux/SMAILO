@@ -79,8 +79,10 @@ async def category_chosen(call: CallbackQuery):
     await call.answer()
 
 
-@dp.message(F.chat.type == "private", ~F.text.startswith("/"))
+@dp.message(F.chat.type == "private")
 async def user_message_handler(message: Message):
+    if message.text and message.text.startswith("/"):
+        return
     user = message.from_user
     cid = LOG_CHAT_ID
     if not cid:
