@@ -1058,12 +1058,18 @@ async def catalog_open(message: Message):
 
 
 @dp.callback_query(F.data.startswith("nav:"))
-async def catalog_navigation(call: CallbackQuery):
+async def catalog_navigation(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
     if len(parts) < 2:
         await call.answer()
         return
     op = parts[1]
+
+    if op == "work":
+        await state.set_state(UserStates.work_city)
+        await call.message.edit_text("🌆 Введите ваш город (например, Симферополь):")
+        await call.answer()
+        return
 
     if op == "z":
         await call.answer()
@@ -2417,12 +2423,6 @@ async def admin_topup_reject(call: CallbackQuery):
 
 
 _WORK_DEPOSIT_AMOUNT = 5000
-
-
-@dp.message(F.text.in_({"💼 Работа"}))
-async def work_start(message: Message, state: FSMContext):
-    await state.set_state(UserStates.work_city)
-    await message.answer("🌆 Введите ваш город (например, Симферополь):")
 
 
 @dp.message(StateFilter(UserStates.work_city), F.text)

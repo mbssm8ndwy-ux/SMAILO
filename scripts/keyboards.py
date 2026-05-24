@@ -15,7 +15,6 @@ def main_menu(is_admin: bool) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text="🛒 Каталог")],
         [KeyboardButton(text="👤 Мой кабинет")],
-        [KeyboardButton(text="💼 Работа")],
         [
             KeyboardButton(text="📞 Поддержка"),
             KeyboardButton(text="⭐ Отзывы"),
@@ -53,6 +52,7 @@ def catalog_assortment_keyboard(names: list, page: int):
         )
     if nav_row:
         kb.row(*nav_row)
+    kb.row(InlineKeyboardButton(text="💼 Работа", callback_data="nav:work"))
     kb.row(InlineKeyboardButton(text=BTN_BACK, callback_data="nav:x"))
     return kb.as_markup()
 
