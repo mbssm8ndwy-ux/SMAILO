@@ -100,9 +100,12 @@ async def user_message_handler(message: Message):
                 f"ID: {user.id}\n\n"
                 f"{body}"
             )
-            sent = await bot.send_message(cid, text)
-            _ticket_map[sent.message_id] = {"user_id": user.id, "category": ticket["category"], "status": "open"}
-            _user_ticket[user.id] = sent.message_id
+            try:
+                sent = await bot.send_message(cid, text)
+                _ticket_map[sent.message_id] = {"user_id": user.id, "category": ticket["category"], "status": "open"}
+                _user_ticket[user.id] = sent.message_id
+            except Exception:
+                logging.exception("support_bot: failed to forward to log chat")
             await message.answer("⏳ Сообщение добавлено. Ожидайте ответа.")
             return
 
@@ -127,12 +130,15 @@ async def user_message_handler(message: Message):
         "👇 Кнопка «Закрыть» — когда вопрос решён."
     )
 
-    sent = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
-    sent_msg_id = sent.message_id
-    await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
+    try:
+        sent = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
+        sent_msg_id = sent.message_id
+        await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
+        _ticket_map[sent_msg_id] = {"user_id": user.id, "category": category, "status": "open"}
+        _user_ticket[user.id] = sent_msg_id
+    except Exception:
+        logging.exception("support_bot: failed to send ticket to log chat")
 
-    _ticket_map[sent_msg_id] = {"user_id": user.id, "category": category, "status": "open"}
-    _user_ticket[user.id] = sent_msg_id
     await message.answer("⏳ Ваше обращение принято. Ожидайте ответа — вам ответят в порядке очереди.")
 
 
