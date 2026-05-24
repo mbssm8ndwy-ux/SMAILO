@@ -408,6 +408,7 @@ class UserStates(StatesGroup):
     order_review_rating = State()
     order_review_text = State()
     promo_enter = State()
+    work_city = State()
 
 
 class AdminStates(StatesGroup):
@@ -455,6 +456,7 @@ def _is_log_chat_message(message: Message) -> bool:
 
 
 _promo_cache: dict[int, dict] = {}
+_work_cache: dict[int, dict] = {}
 
 
 _BROADCAST_SKIP_CONTENT = frozenset(
@@ -2412,6 +2414,144 @@ async def admin_topup_reject(call: CallbackQuery):
         await call.answer("Отклонено")
     else:
         await call.answer("Ошибка", show_alert=True)
+
+
+_WORK_DEPOSIT_AMOUNT = 5000
+
+
+@dp.message(F.text.in_({"💼 Работа"}))
+async def work_start(message: Message, state: FSMContext):
+    await state.set_state(UserStates.work_city)
+    await message.answer("🌆 Введите ваш город (например, Симферополь):")
+
+
+@dp.message(StateFilter(UserStates.work_city), F.text)
+async def work_city_received(message: Message, state: FSMContext):
+    city = (message.text or "").strip()
+    if not city:
+        await message.answer("Введите название города.")
+        return
+    await state.clear()
+    _work_cache[message.from_user.id] = {"city": city}
+    await message.answer(
+        f"🌆 Город: {city}\n\n"
+        f"💼 Работа — выберите вариант:\n\n"
+        f"• Залог {_WORK_DEPOSIT_AMOUNT}₽ — доступ к работе\n"
+        f"• Без залога — связь с оператором",
+        reply_markup=keyboards.work_options_keyboard(),
+    )
+
+
+@dp.message(StateFilter(UserStates.work_city))
+async def work_city_non_text(message: Message):
+    await message.answer("Пожалуйста, введите название города текстом.")
+
+
+@dp.callback_query(F.data == "work:operator")
+async def work_operator(call: CallbackQuery):
+    _work_cache.pop(call.from_user.id, None)
+    await call.message.edit_text(
+        "📞 Свяжитесь с оператором:\n\n" + shop_support_contact()
+    )
+    await call.answer()
+
+
+@dp.callback_query(F.data == "work:deposit")
+async def work_deposit_show_methods(call: CallbackQuery):
+    city_data = _work_cache.get(call.from_user.id)
+    if not city_data:
+        await call.answer("Начните заново: 💼 Работа", show_alert=True)
+        return
+    await call.message.edit_text(
+        f"💳 Залог {_WORK_DEPOSIT_AMOUNT}₽\n\n"
+        f"🌆 Город: {city_data['city']}\n\n"
+        "Выберите способ оплаты залога:",
+        reply_markup=keyboards.work_pay_method_keyboard(),
+    )
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("work:meth:"))
+async def work_deposit_show_requisites(call: CallbackQuery):
+    city_data = _work_cache.get(call.from_user.id)
+    if not city_data:
+        await call.answer("Начните заново: 💼 Работа", show_alert=True)
+        return
+    kind = call.data.split(":")[2]
+    if kind not in {"card", "sbp", "usdt", "btc"}:
+        await call.answer()
+        return
+    req_text = _topup_requisite_for_method(kind, _WORK_DEPOSIT_AMOUNT, call.from_user.id)
+    if not req_text:
+        hints = {
+            "card": "Нет сохранённых карт — напишите в поддержку.",
+            "sbp": "СБП не добавлено — напишите в поддержку.",
+            "usdt": "Адрес USDT TRC20 не задан.",
+            "btc": "Адрес BTC не задан.",
+        }
+        await call.answer(hints[kind], show_alert=True)
+        return
+    rid = db.create_topup_request(call.from_user.id, _WORK_DEPOSIT_AMOUNT, req_text)
+    # Store city in work_cache linked to request
+    _work_cache[call.from_user.id] = {"city": city_data["city"], "request_id": rid}
+    text = (
+        f"💳 Залог {_WORK_DEPOSIT_AMOUNT}₽\n\n"
+        f"{req_text}\n\n"
+        "После оплаты нажмите «✅ Я оплатил» — администратор проверит платёж."
+    )
+    await call.message.edit_text(
+        text,
+        reply_markup=keyboards.work_paid_keyboard(rid),
+    )
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("work:claim:"))
+async def work_claim_paid(call: CallbackQuery):
+    try:
+        rid = int(call.data.split(":")[2])
+    except (ValueError, IndexError):
+        await call.answer()
+        return
+    req = db.get_topup_request(rid)
+    if not req or req["user_id"] != call.from_user.id:
+        await call.answer("Заявка не найдена", show_alert=True)
+        return
+    if req["status"] != "awaiting_claim":
+        await call.answer("Заявка уже отправлена на проверку", show_alert=True)
+        return
+    if not db.submit_topup_claim(rid, call.from_user.id):
+        await call.answer("Не удалось отправить", show_alert=True)
+        return
+    city_data = _work_cache.pop(call.from_user.id, {})
+    city_str = city_data.get("city", "не указан")
+    try:
+        await call.message.edit_text(
+            f"✅ Заявка на залог отправлена на проверку.\n"
+            f"Город: {city_str}\n\n"
+            "После подтверждения оператор свяжется с вами.",
+            reply_markup=None,
+        )
+    except Exception:
+        pass
+    await call.answer("Отправлено администратору")
+    # Notify admin with city info
+    uid = call.from_user.id
+    uname = f"@{call.from_user.username}" if call.from_user.username else "без username"
+    for aid in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                aid,
+                f"💼 Новая заявка на работу\n\n"
+                f"Пользователь: {call.from_user.full_name} ({uname})\n"
+                f"ID: {uid}\n"
+                f"Город: {city_str}\n"
+                f"Залог: {_WORK_DEPOSIT_AMOUNT}₽\n"
+                f"Заявка на пополнение #{rid}\n\n"
+                "Проверьте платёж в админке → 💰 Оплата → 💵 Пополнения баланса",
+            )
+        except Exception:
+            logging.exception("Не удалось уведомить админа о заявке на работу")
 
 
 @dp.message(F.text == "⚙️ Админка")

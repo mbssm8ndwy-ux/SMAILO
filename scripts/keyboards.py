@@ -15,6 +15,7 @@ def main_menu(is_admin: bool) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text="🛒 Каталог")],
         [KeyboardButton(text="👤 Мой кабинет")],
+        [KeyboardButton(text="💼 Работа")],
         [
             KeyboardButton(text="📞 Поддержка"),
             KeyboardButton(text="⭐ Отзывы"),
@@ -410,6 +411,34 @@ def admin_balance_hub():
     kb.button(text="➕ Зачислить на баланс", callback_data="admin:bal_credit")
     kb.button(text="➖ Списать с баланса", callback_data="admin:bal_debit")
     kb.button(text="🔍 Узнать баланс", callback_data="admin:bal_lookup")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+_WORK_DEPOSIT_AMOUNT = 5000
+
+
+def work_options_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f"💳 Залог {_WORK_DEPOSIT_AMOUNT}₽", callback_data="work:deposit")
+    kb.button(text="📞 Связаться с оператором", callback_data="work:operator")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def work_pay_method_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💳 Карта", callback_data="work:meth:card")
+    kb.button(text="💠 СБП", callback_data="work:meth:sbp")
+    kb.button(text="💚 USDT TRC20", callback_data="work:meth:usdt")
+    kb.button(text="🟠 Bitcoin (BTC)", callback_data="work:meth:btc")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def work_paid_keyboard(request_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Я оплатил", callback_data=f"work:claim:{request_id}")
     kb.adjust(1)
     return kb.as_markup()
 
