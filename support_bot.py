@@ -129,12 +129,16 @@ async def user_message_handler(message: Message):
                 f"ID: {user.id}\n\n"
                 f"{body}"
             )
+            db_id = db.add_support_bot_ticket(user.id, ticket["category"])
+            sent_msg_id = None
             try:
                 sent = await bot.send_message(cid, text)
-                _ticket_map[sent.message_id] = {"user_id": user.id, "category": ticket["category"], "status": "open"}
-                _user_ticket[user.id] = sent.message_id
+                sent_msg_id = sent.message_id
             except Exception:
                 logging.exception("support_bot: failed to forward to log chat")
+            _ticket_map.setdefault(sent_msg_id or 0, {"user_id": user.id, "category": ticket["category"], "status": "open", "db_id": db_id})
+            if sent_msg_id:
+                _user_ticket[user.id] = sent_msg_id
             await message.answer("⏳ Сообщение добавлено. Ожидайте ответа.")
             return
 
@@ -161,14 +165,18 @@ async def user_message_handler(message: Message):
         "👇 Кнопка «Закрыть» — когда вопрос решён."
     )
 
+    db_id = db.add_support_bot_ticket(user.id, category)
+    sent_msg_id = None
     try:
         sent = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
         sent_msg_id = sent.message_id
         await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
-        _ticket_map[sent_msg_id] = {"user_id": user.id, "category": category, "status": "open", "db_id": db.add_support_bot_ticket(user.id, category)}
-        _user_ticket[user.id] = sent_msg_id
     except Exception:
         logging.exception("support_bot: failed to send ticket to log chat")
+
+    _ticket_map.setdefault(sent_msg_id or 0, {"user_id": user.id, "category": category, "status": "open", "db_id": db_id})
+    if sent_msg_id:
+        _user_ticket[user.id] = sent_msg_id
 
     await message.answer("⏳ Ваше обращение принято. Ожидайте ответа — вам ответят в порядке очереди.")
 
