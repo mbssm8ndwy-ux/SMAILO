@@ -444,16 +444,6 @@ def work_paid_keyboard(request_id: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def ticket_categories_keyboard() -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❓ Вопрос", callback_data="ticket:q")
-    kb.button(text="📦 По заказу", callback_data="ticket:order")
-    kb.button(text="💼 Работа", callback_data="ticket:work")
-    kb.button(text="⚠️ Другое", callback_data="ticket:other")
-    kb.adjust(1)
-    return kb.as_markup()
-
-
 def promo_ask_keyboard(product_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🎫 Ввести промокод", callback_data=f"promo:enter:{product_id}")
