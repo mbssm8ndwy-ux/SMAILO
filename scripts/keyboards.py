@@ -53,6 +53,7 @@ def catalog_assortment_keyboard(names: list, page: int):
     if nav_row:
         kb.row(*nav_row)
     kb.row(InlineKeyboardButton(text="💼 Работа", callback_data="nav:work"))
+    kb.row(InlineKeyboardButton(text="📩 Создать тикет", callback_data="nav:ticket"))
     kb.row(InlineKeyboardButton(text=BTN_BACK, callback_data="nav:x"))
     return kb.as_markup()
 
@@ -439,6 +440,16 @@ def work_pay_method_keyboard() -> InlineKeyboardMarkup:
 def work_paid_keyboard(request_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Я оплатил", callback_data=f"work:claim:{request_id}")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def ticket_categories_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❓ Вопрос", callback_data="ticket:q")
+    kb.button(text="📦 По заказу", callback_data="ticket:order")
+    kb.button(text="💼 Работа", callback_data="ticket:work")
+    kb.button(text="⚠️ Другое", callback_data="ticket:other")
     kb.adjust(1)
     return kb.as_markup()
 

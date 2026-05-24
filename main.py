@@ -29,7 +29,6 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import config
 from db import MAX_PAYMENT_CARDS, MAX_PAYMENT_SBP, Database
 from scripts import keyboards
-import support_bot
 
 BOT_START_TIME = datetime.now()
 _BOT_USERNAME: str | None = None
@@ -85,11 +84,8 @@ DEFAULT_WELCOME_TEXT = (
 )
 
 
-_SUPPORT_BOT_USERNAME: str | None = None
-
-
 def shop_support_contact() -> str:
-    return _SUPPORT_BOT_USERNAME or _BOT_USERNAME or "@qcryptopay"
+    return _BOT_USERNAME or "@qcryptopay"
 
 
 def shop_rules_text() -> str:
@@ -101,7 +97,7 @@ def shop_about_text() -> str:
 
 
 def shop_payment_support() -> str:
-    return _SUPPORT_BOT_USERNAME or _BOT_USERNAME or "@qcryptopay"
+    return _BOT_USERNAME or "@qcryptopay"
 
 
 def shop_reviews_text() -> str:
@@ -1072,6 +1068,14 @@ async def catalog_navigation(call: CallbackQuery, state: FSMContext):
     if op == "work":
         await state.set_state(UserStates.work_city)
         await call.message.edit_text("🌆 Введите ваш город (например, Симферополь):")
+        await call.answer()
+        return
+
+    if op == "ticket":
+        await call.message.edit_text(
+            "📩 Создание тикета\n\nВыберите категорию:",
+            reply_markup=keyboards.ticket_categories_keyboard(),
+        )
         await call.answer()
         return
 
@@ -2426,6 +2430,29 @@ async def admin_topup_reject(call: CallbackQuery):
         await call.answer("Ошибка", show_alert=True)
 
 
+_TICKET_TOPICS = {
+    "ticket:q": ("Вопрос", "общий вопрос"),
+    "ticket:order": ("Проблема", "по заказу"),
+    "ticket:work": ("Работа", "связь с оператором"),
+    "ticket:other": ("Другое", "без категории"),
+}
+
+
+@dp.callback_query(F.data.startswith("ticket:"))
+async def ticket_category_pick(call: CallbackQuery, state: FSMContext):
+    topic_info = _TICKET_TOPICS.get(call.data)
+    if not topic_info:
+        await call.answer()
+        return
+    await state.set_state(UserStates.support_wait_text)
+    await state.update_data(support_topic=topic_info[0], support_context=topic_info[1])
+    await call.message.edit_text(
+        f"📩 Тикет: {topic_info[0]}\n\n"
+        "Опишите ваше обращение одним сообщением:\n/cancel — отмена."
+    )
+    await call.answer()
+
+
 _WORK_DEPOSIT_AMOUNT = 5000
 
 
@@ -2452,12 +2479,12 @@ async def work_city_non_text(message: Message):
 
 
 @dp.callback_query(F.data == "work:operator")
-async def work_operator(call: CallbackQuery):
+async def work_operator(call: CallbackQuery, state: FSMContext):
     _work_cache.pop(call.from_user.id, None)
-    contact = shop_support_contact()
+    await state.set_state(UserStates.support_wait_text)
+    await state.update_data(support_topic="Работа", support_context="связь с оператором")
     await call.message.edit_text(
-        f"📞 Напишите боту поддержки:\n{contact}\n\n"
-        "Ваше сообщение будет доставлено оператору."
+        "📞 Опишите ваш вопрос, и оператор свяжется с вами:\n/cancel — отмена."
     )
     await call.answer()
 
@@ -4160,23 +4187,13 @@ app.router.add_get("/info", handle_info)
 
 @dp.startup()
 async def on_startup() -> None:
-    global _BOT_USERNAME, _SUPPORT_BOT_USERNAME
+    global _BOT_USERNAME
     try:
         me = await bot.get_me()
         _BOT_USERNAME = f"@{me.username}" if me and me.username else None
         logging.info("Bot username: %s", _BOT_USERNAME)
     except Exception:
         logging.exception("Failed to get bot username")
-    try:
-        support_me = await support_bot.bot.get_me()
-        _SUPPORT_BOT_USERNAME = f"@{support_me.username}" if support_me and support_me.username else None
-        logging.info("Support bot username: %s", _SUPPORT_BOT_USERNAME)
-    except Exception:
-        logging.exception("Failed to get support bot username")
-
-
-async def run_support_bot_wrapper():
-    await support_bot.run_support_bot()
 
 
 async def main() -> None:
@@ -4185,9 +4202,6 @@ async def main() -> None:
     site = web.TCPSite(runner, "0.0.0.0", LOCAL_PORT)
     await site.start()
     logging.info(f"Web server started on port {LOCAL_PORT}")
-
-    support_task = asyncio.create_task(run_support_bot_wrapper(), name="support_bot")
-
     while True:
         try:
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
@@ -4195,12 +4209,6 @@ async def main() -> None:
         except TelegramNetworkError as exc:
             logging.error("Network error while polling Telegram: %s", exc)
             await asyncio.sleep(5)
-        finally:
-            support_task.cancel()
-            try:
-                await support_task
-            except asyncio.CancelledError:
-                pass
 
 
 if __name__ == "__main__":
