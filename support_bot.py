@@ -186,7 +186,18 @@ async def close_ticket(call: CallbackQuery):
     msg_id = int(call.data.split(":")[1])
     ticket = _ticket_map.get(msg_id)
     if not ticket:
-        await call.answer("Тикет не найден", show_alert=True)
+        text = call.message.text or call.message.caption or ""
+        m = re.search(r"ID:\s*(\d+)", text)
+        if m:
+            uid = int(m.group(1))
+            rows = db.get_user_support_bot_tickets(uid)
+            open_rows = [r for r in rows if r["status"] == "open"]
+            if open_rows:
+                latest = open_rows[0]
+                ticket = {"user_id": uid, "category": latest["category"], "status": "open", "db_id": latest["id"]}
+                _ticket_map[msg_id] = ticket
+    if not ticket:
+        await call.answer("❌ Тикет не найден (возможно бот перезагружался)", show_alert=True)
         return
     if ticket["status"] == "closed":
         await call.answer("Тикет уже закрыт")
