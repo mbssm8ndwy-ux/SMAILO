@@ -43,6 +43,7 @@ def _categories_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for cb, label in CATEGORIES.items():
         kb.button(text=label, callback_data=cb)
+    kb.button(text="📋 Мои тикеты", callback_data="mytickets")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -74,11 +75,12 @@ async def cmd_ping(message: Message):
     await message.answer("pong")
 
 
-@dp.message(Command("tickets"))
-async def cmd_tickets(message: Message):
-    tickets = db.get_user_support_bot_tickets(message.from_user.id)
+@dp.callback_query(F.data == "mytickets")
+async def show_my_tickets(call: CallbackQuery):
+    tickets = db.get_user_support_bot_tickets(call.from_user.id)
     if not tickets:
-        await message.answer("У вас нет тикетов.")
+        await call.message.edit_text("У вас нет тикетов.", reply_markup=_categories_keyboard())
+        await call.answer()
         return
     lines = []
     for t in tickets:
@@ -86,7 +88,8 @@ async def cmd_tickets(message: Message):
         created = t["created_at"][:16] if t["created_at"] else "?"
         closed = t["closed_at"][:16] if t.get("closed_at") else "—"
         lines.append(f"{status} | {t['category']} | 📅 {created} | ❌ {closed}")
-    await message.answer("📋 **Ваши тикеты:**\n\n" + "\n".join(lines))
+    await call.message.edit_text("📋 Ваши тикеты:\n\n" + "\n".join(lines), reply_markup=_categories_keyboard())
+    await call.answer()
 
 
 @dp.callback_query(F.data.startswith("ticket:"))
@@ -158,14 +161,14 @@ async def user_message_handler(message: Message):
         "👇 Кнопка «Закрыть» — когда вопрос решён."
     )
 
-        try:
-            sent = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
-            sent_msg_id = sent.message_id
-            await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
-            _ticket_map[sent_msg_id] = {"user_id": user.id, "category": category, "status": "open", "db_id": db.add_support_bot_ticket(user.id, category)}
-            _user_ticket[user.id] = sent_msg_id
-        except Exception:
-            logging.exception("support_bot: failed to send ticket to log chat")
+    try:
+        sent = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
+        sent_msg_id = sent.message_id
+        await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
+        _ticket_map[sent_msg_id] = {"user_id": user.id, "category": category, "status": "open", "db_id": db.add_support_bot_ticket(user.id, category)}
+        _user_ticket[user.id] = sent_msg_id
+    except Exception:
+        logging.exception("support_bot: failed to send ticket to log chat")
 
     await message.answer("⏳ Ваше обращение принято. Ожидайте ответа — вам ответят в порядке очереди.")
 
