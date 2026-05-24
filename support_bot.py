@@ -4,9 +4,7 @@ import logging
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.filters import Command, StateFilter
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -21,15 +19,12 @@ dp = Dispatcher(storage=MemoryStorage())
 
 LOG_CHAT_ID = int(config.LOG_CHAT_ID)
 
-# log_message_id -> {"user_id": int, "category": str, "status": str}
+# log_msg_id -> {"user_id", "category", "status"}
 _ticket_map: dict[int, dict] = {}
-# user_id -> log_message_id (latest open ticket)
+# user_id -> latest log_msg_id with open ticket
 _user_ticket: dict[int, int] = {}
-
-
-class TicketStates(StatesGroup):
-    choosing_category = State()
-
+# user_id -> pending category (before first message sent)
+_pending_category: dict[int, str] = {}
 
 CATEGORIES = {
     "ticket:q": "❓ Вопрос",
@@ -37,7 +32,6 @@ CATEGORIES = {
     "ticket:work": "💼 Работа",
     "ticket:other": "⚠️ Другое",
 }
-CATEGORY_NAMES = {v: k for k, v in CATEGORIES.items()}
 
 
 def _categories_keyboard() -> InlineKeyboardMarkup:
@@ -56,27 +50,27 @@ def _close_ticket_keyboard(msg_id: int) -> InlineKeyboardMarkup:
 
 
 @dp.message(Command("start"))
-async def cmd_start(message: Message, state: FSMContext):
-    await state.set_state(TicketStates.choosing_category)
+async def cmd_start(message: Message):
+    _pending_category.pop(message.from_user.id, None)
     await message.answer(
         "📩 Выберите категорию тикета:",
         reply_markup=_categories_keyboard(),
     )
 
 
-@dp.message(Command("cancel"), StateFilter("*"))
-async def cmd_cancel(message: Message, state: FSMContext):
-    await state.clear()
+@dp.message(Command("cancel"))
+async def cmd_cancel(message: Message):
+    _pending_category.pop(message.from_user.id, None)
     await message.answer("Отменено.")
 
 
 @dp.callback_query(F.data.startswith("ticket:"))
-async def category_chosen(call: CallbackQuery, state: FSMContext):
+async def category_chosen(call: CallbackQuery):
     label = CATEGORIES.get(call.data)
     if not label:
         await call.answer()
         return
-    await state.update_data(ticket_category=label)
+    _pending_category[call.from_user.id] = label
     await call.message.edit_text(
         f"📩 Категория: {label}\n\n"
         "Опишите ваше обращение одним сообщением.\n/cancel — отмена."
@@ -85,19 +79,18 @@ async def category_chosen(call: CallbackQuery, state: FSMContext):
 
 
 @dp.message(F.chat.type == "private", ~F.text.startswith("/"))
-async def user_message_handler(message: Message, state: FSMContext):
+async def user_message_handler(message: Message):
     user = message.from_user
     cid = LOG_CHAT_ID
     if not cid:
         await message.answer("Поддержка временно недоступна.")
         return
 
-    # If user already has an open ticket, forward to same thread
+    # If user already has an open ticket, forward as follow-up
     existing_msg_id = _user_ticket.get(user.id)
     if existing_msg_id and existing_msg_id in _ticket_map:
         ticket = _ticket_map[existing_msg_id]
         if ticket["status"] == "open":
-            # Forward to log chat as follow-up
             uname = f"@{user.username}" if user.username else "без username"
             body = message.text or message.caption or "(без текста)"
             text = (
@@ -112,14 +105,9 @@ async def user_message_handler(message: Message, state: FSMContext):
             await message.answer("✅ Сообщение добавлено в ваш тикет.")
             return
 
-    # No open ticket — need category first
-    st = await state.get_state()
-    category = None
-    if st:
-        data = await state.get_data()
-        category = data.get("ticket_category")
+    # No open ticket — check if user selected a category
+    category = _pending_category.pop(user.id, None)
     if not category:
-        await state.set_state(TicketStates.choosing_category)
         await message.answer(
             "📩 Сначала выберите категорию тикета:",
             reply_markup=_categories_keyboard(),
@@ -134,45 +122,16 @@ async def user_message_handler(message: Message, state: FSMContext):
         f"От: {user.full_name} ({uname})\n"
         f"ID: {user.id}\n\n"
         f"{body}\n\n"
-        "↩️ Ответьте реплаем — ответ уйдёт пользователю."
+        "↩️ Ответьте реплаем — ответ уйдёт пользователю.\n"
+        "👇 Кнопка «Закрыть» — когда вопрос решён."
     )
 
-    if message.photo:
-        sent = await bot.send_photo(cid, message.photo[-1].file_id, caption=text, reply_markup=_close_ticket_keyboard(0))
-        sent_msg_id = sent.message_id
-        # Edit to add real message_id in callback
-        await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
-    elif message.video:
-        sent = await bot.send_video(cid, message.video.file_id, caption=text, reply_markup=_close_ticket_keyboard(0))
-        sent_msg_id = sent.message_id
-        await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
-    elif message.document:
-        sent = await bot.send_document(cid, message.document.file_id, caption=text, reply_markup=_close_ticket_keyboard(0))
-        sent_msg_id = sent.message_id
-        await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
-    elif message.voice:
-        sent = await bot.send_voice(cid, message.voice.file_id, caption=text, reply_markup=_close_ticket_keyboard(0))
-        sent_msg_id = sent.message_id
-        await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
-    elif message.video_note:
-        sent = await bot.send_video_note(cid, message.video_note.file_id)
-        sent2 = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
-        sent_msg_id = sent2.message_id
-        await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
-        _ticket_map[sent_msg_id] = {"user_id": user.id, "category": category, "status": "open"}
-    elif message.sticker:
-        sent = await bot.send_sticker(cid, message.sticker.file_id)
-        sent2 = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
-        sent_msg_id = sent2.message_id
-        await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
-    else:
-        sent = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
-        sent_msg_id = sent.message_id
-        await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
+    sent = await bot.send_message(cid, text, reply_markup=_close_ticket_keyboard(0))
+    sent_msg_id = sent.message_id
+    await bot.edit_message_reply_markup(cid, sent_msg_id, reply_markup=_close_ticket_keyboard(sent_msg_id))
 
     _ticket_map[sent_msg_id] = {"user_id": user.id, "category": category, "status": "open"}
     _user_ticket[user.id] = sent_msg_id
-    await state.clear()
     await message.answer("✅ Тикет создан. Ответ придёт сюда.")
 
 
@@ -188,7 +147,6 @@ async def close_ticket(call: CallbackQuery):
         return
     ticket["status"] = "closed"
     user_id = ticket["user_id"]
-    # Remove from user_ticket if this was the latest
     if _user_ticket.get(user_id) == msg_id:
         del _user_ticket[user_id]
     try:
@@ -213,7 +171,7 @@ async def log_reply_to_user(message: Message):
         await message.reply("❌ Пользователь не найден (тикет сброшен при перезапуске).")
         return
     if ticket["status"] == "closed":
-        await message.reply("❌ Тикет уже закрыт. Пользователь написал заново — создаст новый.")
+        await message.reply("❌ Тикет уже закрыт.")
         return
     user_id = ticket["user_id"]
     text = message.text or message.caption or ""
