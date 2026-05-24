@@ -77,7 +77,6 @@ async def category_chosen(call: CallbackQuery, state: FSMContext):
         await call.answer()
         return
     await state.update_data(ticket_category=label)
-    await state.clear()
     await call.message.edit_text(
         f"📩 Категория: {label}\n\n"
         "Опишите ваше обращение одним сообщением.\n/cancel — отмена."
