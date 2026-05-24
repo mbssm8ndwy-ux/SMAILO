@@ -2460,7 +2460,7 @@ async def work_operator(call: CallbackQuery):
     contact = shop_support_contact()
     await call.message.edit_text(
         f"📞 Напишите боту поддержки:\n{contact}\n\n"
-        "Там создайте тикет — оператор ответит."
+        "Выберите категорию «💼 Работа» и опишите ваш вопрос."
     )
     await call.answer()
 
@@ -2557,7 +2557,8 @@ async def work_claim_paid(call: CallbackQuery):
                 f"Город: {city_str}\n"
                 f"Залог: {_WORK_DEPOSIT_AMOUNT}₽\n"
                 f"Заявка на пополнение #{rid}\n\n"
-                "Проверьте платёж в админке → 💰 Оплата → 💵 Пополнения баланса",
+                "Проверьте платёж в админке → 💰 Оплата → 💵 Пополнения баланса\n"
+                "После подтверждения ответьте пользователю через бота поддержки.",
             )
         except Exception:
             logging.exception("Не удалось уведомить админа о заявке на работу")
