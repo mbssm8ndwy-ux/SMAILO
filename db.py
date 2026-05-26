@@ -151,15 +151,33 @@ class _TursoResult:
 
 
 class _TursoConnection:
+    def __init__(self):
+        self._last_result = None
+
     def cursor(self):
         return self
 
     def execute(self, sql, params=None):
-        return _turso_execute(sql, params)
+        self._last_result = _turso_execute(sql, params)
+        return self
 
     def executemany(self, sql, seq):
         for params in seq:
             _turso_exec(sql, params)
+
+    def fetchall(self):
+        return self._last_result.fetchall() if self._last_result else []
+
+    def fetchone(self):
+        return self._last_result.fetchone() if self._last_result else None
+
+    @property
+    def rowcount(self):
+        return self._last_result.rowcount if self._last_result else 0
+
+    @property
+    def lastrowid(self):
+        return self._last_result.lastrowid if self._last_result else 0
 
     def close(self):
         pass
