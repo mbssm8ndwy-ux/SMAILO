@@ -1,4 +1,6 @@
+import json
 import sqlite3
+import urllib.request
 from typing import Dict, List, Optional
 
 import config
@@ -7,25 +9,69 @@ import logging
 MAX_PAYMENT_CARDS = 10
 MAX_PAYMENT_SBP = 10
 
-_HAS_TURSO = False
-if config.TURSO_URL and config.TURSO_AUTH_TOKEN:
-    try:
-        import libsql_client
-        _HAS_TURSO = True
-    except ImportError:
-        logging.warning("TURSO_URL is set but libsql_client is not installed. Install with: pip install libsql-client")
+_USE_TURSO = bool(config.TURSO_URL and config.TURSO_AUTH_TOKEN)
+_TURSO_HTTP_URL = config.TURSO_URL.replace("libsql://", "https://") if _USE_TURSO else ""
+_TURSO_TOKEN = config.TURSO_AUTH_TOKEN if _USE_TURSO else ""
 
 
-class _TursoCursor:
-    def __init__(self, result):
-        self._result = result
+def _turso_type(v):
+    if v is None:
+        return {"type": "null"}
+    if isinstance(v, bool):
+        return {"type": "integer", "value": "1" if v else "0"}
+    if isinstance(v, int):
+        return {"type": "integer", "value": str(v)}
+    if isinstance(v, float):
+        return {"type": "float", "value": str(v)}
+    return {"type": "text", "value": str(v)}
+
+
+def _turso_exec(sql, params=None):
+    """Execute SQL via Turso HTTP API and return parsed result."""
+    args = []
+    if params:
+        for p in (params if isinstance(params, (list, tuple)) else (params,)):
+            args.append(_turso_type(p))
+    body = json.dumps({
+        "requests": [{
+            "type": "execute",
+            "stmt": {"sql": sql, "args": args}
+        }]
+    }).encode()
+    req = urllib.request.Request(
+        _TURSO_HTTP_URL + "/v2/pipeline",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {_TURSO_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    resp = json.loads(urllib.request.urlopen(req, timeout=15).read())
+    result = resp.get("results", [{}])[0].get("response", {}).get("result", {})
+    return {
+        "cols": [c["name"] for c in result.get("cols", [])],
+        "rows": result.get("rows", []),
+        "affected_row_count": result.get("affected_row_count", 0),
+        "last_insert_rowid": result.get("last_insert_rowid"),
+    }
+
+
+def _turso_execute(sql, params=None):
+    r = _turso_exec(sql, params)
+    return _TursoResult(r)
+
+
+class _TursoResult:
+    def __init__(self, raw):
+        self._raw = raw
         self._rows = None
-        self._cols = result.columns if result else []
+        self._cols = raw["cols"]
 
     def fetchall(self):
-        if self._rows is None and self._result:
-            self._rows = [{c: r[i] for i, c in enumerate(self._cols)} for r in self._result.rows]
-        return self._rows or []
+        if self._rows is None:
+            self._rows = [{c: r[i] for i, c in enumerate(self._cols)} for r in self._raw["rows"]]
+        return self._rows
 
     def fetchone(self):
         rows = self.fetchall()
@@ -33,30 +79,26 @@ class _TursoCursor:
 
     @property
     def rowcount(self):
-        return self._result.affected_row_count if self._result else 0
+        return self._raw["affected_row_count"]
 
     @property
     def lastrowid(self):
-        return self._result.last_insert_rowid if self._result else 0
+        return self._raw["last_insert_rowid"]
 
 
 class _TursoConnection:
-    def __init__(self, url, auth_token):
-        self._client = libsql_client.create_client_sync(url, auth_token=auth_token)
-
     def cursor(self):
         return self
 
     def execute(self, sql, params=None):
-        result = self._client.execute(sql, params or ())
-        return _TursoCursor(result)
+        return _turso_execute(sql, params)
 
     def executemany(self, sql, seq):
         for params in seq:
-            self._client.execute(sql, params)
+            _turso_exec(sql, params)
 
     def close(self):
-        self._client.close()
+        pass
 
     def commit(self):
         pass
@@ -71,12 +113,11 @@ class _TursoConnection:
 class Database:
     def __init__(self, path: str = "shop.db") -> None:
         self.path = path
-        self._use_turso = _HAS_TURSO
         self._init_db()
 
     def _connect(self):
-        if self._use_turso:
-            return _TursoConnection(config.TURSO_URL, config.TURSO_AUTH_TOKEN)
+        if _USE_TURSO:
+            return _TursoConnection()
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         return connection
