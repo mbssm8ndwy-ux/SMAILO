@@ -961,7 +961,7 @@ async def start(message: Message, state: FSMContext, command: CommandObject):
     await send_event_log(message.from_user, "Пользователь запустил бота")
 
 
-@dp.message(Command("rules"))
+@dp.message(Command("rules"), StateFilter("*"))
 async def rules(message: Message):
     text = shop_rules_text()
     await message.answer(text, disable_web_page_preview=True)
