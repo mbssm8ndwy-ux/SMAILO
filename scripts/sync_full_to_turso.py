@@ -37,10 +37,28 @@ def q(sql, params=None):
     return r["response"]["result"]
 
 
+def q_raw(sql):
+    """Execute raw SQL without args."""
+    body = json.dumps({"requests": [{"type": "execute", "stmt": {"sql": sql}}]}).encode()
+    req = urllib.request.Request(HTTP_URL + "/v2/pipeline", data=body,
+        headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"})
+    resp = json.loads(urllib.request.urlopen(req, timeout=30).read())
+    r = resp["results"][0]
+    if r["type"] == "error":
+        raise Exception(r["error"]["message"])
+
+
 def main():
     if not config.TURSO_URL or not config.TURSO_AUTH_TOKEN:
         print("TURSO_URL / TURSO_AUTH_TOKEN not set")
         return
+
+    print("Disabling FK checks in Turso...")
+    try:
+        q_raw("PRAGMA foreign_keys = OFF")
+        print("  Done")
+    except Exception as e:
+        print(f"  Warning: {e}")
 
     print("Reading local shop.db...")
     conn = sqlite3.connect("shop.db")
