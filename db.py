@@ -26,6 +26,19 @@ def _turso_type(v):
     return {"type": "text", "value": str(v)}
 
 
+def _turso_val(v):
+    """Extract value from Turso typed cell or return as-is."""
+    if v is None or not isinstance(v, dict):
+        return v
+    t = v.get("type")
+    val = v.get("value")
+    if t == "integer":
+        return int(val) if val is not None else None
+    if t == "float":
+        return float(val) if val is not None else None
+    return val
+
+
 def _turso_exec(sql, params=None):
     """Execute SQL via Turso HTTP API and return parsed result."""
     args = []
@@ -49,17 +62,68 @@ def _turso_exec(sql, params=None):
     )
     resp = json.loads(urllib.request.urlopen(req, timeout=15).read())
     result = resp.get("results", [{}])[0].get("response", {}).get("result", {})
+    cols = [c["name"] for c in result.get("cols", [])]
+    rows = [[_turso_val(c) for c in r] for r in result.get("rows", [])]
+    rid = result.get("last_insert_rowid")
+    rid = _turso_val(rid) if rid is not None else None
     return {
-        "cols": [c["name"] for c in result.get("cols", [])],
-        "rows": result.get("rows", []),
+        "cols": cols,
+        "rows": rows,
         "affected_row_count": result.get("affected_row_count", 0),
-        "last_insert_rowid": result.get("last_insert_rowid"),
+        "last_insert_rowid": rid,
     }
 
 
 def _turso_execute(sql, params=None):
     r = _turso_exec(sql, params)
     return _TursoResult(r)
+
+
+class _TursoRow:
+    """Row that supports both row[0] (index) and row['name'] (column name)."""
+    def __init__(self, values, cols):
+        self._values = values
+        self._cols = cols
+        self._map = {c: i for i, c in enumerate(cols)}
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return self._values[self._map[key]]
+        return self._values[key]
+
+    def __setitem__(self, key, value):
+        if isinstance(key, str):
+            self._values[self._map[key]] = value
+        else:
+            self._values[key] = value
+
+    def __iter__(self):
+        # Yield column names so dict(row) produces {name: value, ...}
+        return iter(self._cols)
+
+    def keys(self):
+        return self._cols
+
+    def values(self):
+        return iter(self._values)
+
+    def items(self):
+        return zip(self._cols, self._values)
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except (KeyError, IndexError):
+            return default
+
+    def __contains__(self, key):
+        return key in self._map
+
+    def __len__(self):
+        return len(self._values)
+
+    def __repr__(self):
+        return repr(dict(zip(self._cols, self._values)))
 
 
 class _TursoResult:
@@ -70,7 +134,7 @@ class _TursoResult:
 
     def fetchall(self):
         if self._rows is None:
-            self._rows = [{c: r[i] for i, c in enumerate(self._cols)} for r in self._raw["rows"]]
+            self._rows = [_TursoRow(r, self._cols) for r in self._raw["rows"]]
         return self._rows
 
     def fetchone(self):
