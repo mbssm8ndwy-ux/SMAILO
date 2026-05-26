@@ -30,7 +30,7 @@ def q(sql, params=None):
     req = urllib.request.Request(HTTP_URL + "/v2/pipeline", data=body,
         headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
         method="POST")
-    resp = json.loads(urllib.request.urlopen(req, timeout=30).read())
+    resp = json.loads(urllib.request.urlopen(req, timeout=120).read())
     r = resp["results"][0]
     if r["type"] == "error":
         raise Exception(r["error"]["message"])
@@ -42,7 +42,7 @@ def q_raw(sql):
     body = json.dumps({"requests": [{"type": "execute", "stmt": {"sql": sql}}]}).encode()
     req = urllib.request.Request(HTTP_URL + "/v2/pipeline", data=body,
         headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"})
-    resp = json.loads(urllib.request.urlopen(req, timeout=30).read())
+    resp = json.loads(urllib.request.urlopen(req, timeout=120).read())
     r = resp["results"][0]
     if r["type"] == "error":
         raise Exception(r["error"]["message"])
@@ -101,6 +101,13 @@ def main():
 
     conn.close()
     print("Done! All catalog data is now in Turso.")
+
+    print("Re-enabling FK checks in Turso...")
+    try:
+        q_raw("PRAGMA foreign_keys = ON")
+        print("  Done")
+    except Exception as e:
+        print(f"  Warning: {e}")
 
 
 if __name__ == "__main__":
