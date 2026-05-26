@@ -11,6 +11,10 @@ PAYMENT_NOTIFY_CHAT_ID = int(v) if (v := os.environ.get("PAYMENT_NOTIFY_CHAT_ID"
 LOG_FORUM_TOPIC_ID = int(v) if (v := os.environ.get("LOG_FORUM_TOPIC_ID", "")).strip() else None
 PAYMENT_NOTIFY_TOPIC_ID = int(v) if (v := os.environ.get("PAYMENT_NOTIFY_TOPIC_ID", "")).strip() else None
 
+# Turso cloud database (optional — если не задано, используется локальный shop.db)
+TURSO_URL = os.environ.get("TURSO_URL", "").strip()
+TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+
 # Shop info
 SUPPORT_CONTACT = os.environ.get("SUPPORT_CONTACT", "@qcryptopay")
 PAYMENT_SUPPORT_CONTACT = os.environ.get("PAYMENT_SUPPORT_CONTACT", "@qcryptopay")

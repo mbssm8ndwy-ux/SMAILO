@@ -1,16 +1,82 @@
 import sqlite3
 from typing import Dict, List, Optional
 
+import config
+import logging
+
 MAX_PAYMENT_CARDS = 10
 MAX_PAYMENT_SBP = 10
+
+_HAS_TURSO = False
+if config.TURSO_URL and config.TURSO_AUTH_TOKEN:
+    try:
+        import libsql_client
+        _HAS_TURSO = True
+    except ImportError:
+        logging.warning("TURSO_URL is set but libsql_client is not installed. Install with: pip install libsql-client")
+
+
+class _TursoCursor:
+    def __init__(self, result):
+        self._result = result
+        self._rows = None
+        self._cols = result.columns if result else []
+
+    def fetchall(self):
+        if self._rows is None and self._result:
+            self._rows = [{c: r[i] for i, c in enumerate(self._cols)} for r in self._result.rows]
+        return self._rows or []
+
+    def fetchone(self):
+        rows = self.fetchall()
+        return rows[0] if rows else None
+
+    @property
+    def rowcount(self):
+        return self._result.affected_row_count if self._result else 0
+
+    @property
+    def lastrowid(self):
+        return self._result.last_insert_rowid if self._result else 0
+
+
+class _TursoConnection:
+    def __init__(self, url, auth_token):
+        self._client = libsql_client.create_client_sync(url, auth_token=auth_token)
+
+    def cursor(self):
+        return self
+
+    def execute(self, sql, params=None):
+        result = self._client.execute(sql, params or ())
+        return _TursoCursor(result)
+
+    def executemany(self, sql, seq):
+        for params in seq:
+            self._client.execute(sql, params)
+
+    def close(self):
+        self._client.close()
+
+    def commit(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
 
 
 class Database:
     def __init__(self, path: str = "shop.db") -> None:
         self.path = path
+        self._use_turso = _HAS_TURSO
         self._init_db()
 
     def _connect(self):
+        if self._use_turso:
+            return _TursoConnection(config.TURSO_URL, config.TURSO_AUTH_TOKEN)
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         return connection
