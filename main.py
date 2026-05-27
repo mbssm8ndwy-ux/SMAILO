@@ -1869,13 +1869,25 @@ async def payment_support_user(message: Message):
     await message.answer(f"Поддержка по платежам: {shop_payment_support()}")
 
 
-@dp.message(F.text.in_({"Отзывы", "⭐ Отзывы"}))
-async def reviews(message: Message):
-    rows = db.list_public_reviews(limit=15)
+_MONTH_NAMES_RU = {
+    "01": "Январь", "02": "Февраль", "03": "Март", "04": "Апрель",
+    "05": "Май", "06": "Июнь", "07": "Июль", "08": "Август",
+    "09": "Сентябрь", "10": "Октябрь", "11": "Ноябрь", "12": "Декабрь",
+}
+
+
+def _month_label(month_key: str) -> str:
+    parts = month_key.split("-")
+    if len(parts) != 2:
+        return month_key
+    m = _MONTH_NAMES_RU.get(parts[1], parts[1])
+    return f"{m} {parts[0]}"
+
+
+def _build_reviews_text(rows: list, month_label: str, page: int) -> str:
     if not rows:
-        await message.answer("⭐ Отзывы:")
-        return
-    lines = ["⭐ Отзывы:", ""]
+        return f"⭐ Отзывы ({month_label})\n\nНет отзывов за этот период."
+    lines = [f"⭐ Отзывы ({month_label}) — стр. {page}", ""]
     for i, r in enumerate(rows, start=1):
         txt = (r.get("review_text") or "").strip()
         if len(txt) > 700:
@@ -1886,16 +1898,101 @@ async def reviews(message: Message):
         date_part = date_raw[:10] if len(date_raw) >= 10 else "—"
         rv = int(r.get("review_rating") or 0)
         stars = "⭐" * rv if 1 <= rv <= 5 else "—"
-        lines.extend(
-            [
-                f"{i}) Товар: {city} / {pos}",
-                f"   Дата: {date_part}",
-                f"   Оценка: {stars}",
-                f"   Отзыв: {txt}",
-                "",
-            ]
-        )
-    await _send_admin_plain_chunks(message, "\n".join(lines).strip())
+        lines.extend([
+            f"{i}) {city} / {pos}",
+            f"   {stars} · {date_part}",
+            f"   {txt}",
+            "",
+        ])
+    return "\n".join(lines).strip()
+
+
+async def _send_reviews_with_keyboard(
+    target, month_key: str, page: int, total_pages: int, months: list
+) -> None:
+    rows = db.list_reviews_by_month(month_key, page=page, per_page=5)
+    label = _month_label(month_key)
+    text = _build_reviews_text(rows, label, page)
+    keys = [m["month"] for m in months]
+    cur_idx = keys.index(month_key) if month_key in keys else -1
+    prev_month = keys[cur_idx + 1] if 0 <= cur_idx < len(keys) - 1 else None
+    next_month = keys[cur_idx - 1] if cur_idx > 0 else None
+    kb = keyboards.reviews_month_keyboard(month_key, page, total_pages, prev_month, next_month)
+    if isinstance(target, Message):
+        await target.answer(text, reply_markup=kb)
+    else:
+        await target.message.edit_text(text, reply_markup=kb)
+
+
+@dp.message(F.text.in_({"Отзывы", "⭐ Отзывы"}))
+async def reviews(message: Message):
+    months = db.list_review_months()
+    if not months:
+        await message.answer("⭐ Отзывы:\n\nПока нет отзывов.")
+        return
+    first = months[0]
+    month_key = first["month"]
+    total = int(first["total"])
+    total_pages = max(1, (total + 4) // 5)
+    await _send_reviews_with_keyboard(message, month_key, 1, total_pages, months)
+
+
+@dp.callback_query(F.data == "rv:z")
+async def reviews_dummy(call: CallbackQuery):
+    await call.answer()
+
+
+@dp.callback_query(F.data == "rv:menu")
+async def reviews_back_menu(call: CallbackQuery):
+    await call.answer()
+    months = db.list_review_months()
+    if not months:
+        await call.message.edit_text("⭐ Отзывы:\n\nПока нет отзывов.")
+        return
+    first = months[0]
+    month_key = first["month"]
+    total = int(first["total"])
+    total_pages = max(1, (total + 4) // 5)
+    await _send_reviews_with_keyboard(call, month_key, 1, total_pages, months)
+
+
+@dp.callback_query(F.data.startswith("rvp:"))
+async def reviews_page(call: CallbackQuery):
+    parts = call.data.split(":")
+    if len(parts) != 3:
+        await call.answer()
+        return
+    month_key = parts[1]
+    page = int(parts[2])
+    months = db.list_review_months()
+    total = 0
+    for m in months:
+        if m["month"] == month_key:
+            total = int(m["total"])
+            break
+    if total == 0:
+        await call.answer("Нет отзывов", show_alert=True)
+        return
+    total_pages = max(1, (total + 4) // 5)
+    await _send_reviews_with_keyboard(call, month_key, page, total_pages, months)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("rvm:"))
+async def reviews_month(call: CallbackQuery):
+    month_key = call.data.split(":", 1)[1]
+    months = db.list_review_months()
+    total = 0
+    for m in months:
+        if m["month"] == month_key:
+            total = int(m["total"])
+            break
+    if total == 0:
+        await call.answer("Нет отзывов за этот месяц", show_alert=True)
+        return
+    total_pages = max(1, (total + 4) // 5)
+    await _send_reviews_with_keyboard(call, month_key, 1, total_pages, months)
+    await call.answer()
 
 
 def _cabinet_screen_text(user: types.User) -> str:
