@@ -4211,17 +4211,25 @@ async def handle_info(request):
     uptime = datetime.now() - BOT_START_TIME
     hours, remainder = divmod(int(uptime.total_seconds()), 3600)
     minutes, seconds = divmod(remainder, 60)
+    info = await get_client_info()
     html = f"""
     <html>
     <head><title>SMAILO Bot</title></head>
     <body style="font-family: monospace; padding: 20px; background: #1a1a1a; color: #0f0;">
         <h1>🚀 SMAILO Bot Status</h1>
         <pre>
-╔════════════════════════╗
-║  SMAILO BOT - RUNNING  ║
-╠════════════════════════╣
+╔══════════════════════════════════════════╗
+║  SMAILO BOT - RUNNING                    ║
+╠══════════════════════════════════════════╣
+║  ⏰ Started: {info['timestamp']}
 ║  🕐 Uptime: {hours}h {minutes}m {seconds}s
-╚════════════════════════╝
+╠══════════════════════════════════════════╣
+║  🌐 Local IP: {info['local_ip']}
+║  🌍 Public IP: {info['public_ip']}
+║  💻 OS: {info['platform']} {info['platform_release']}
+║  🐍 Python: {info['python_version']}
+║  🏗️ Architecture: {info['architecture']}
+╚══════════════════════════════════════════╝
         </pre>
     </body>
     </html>
