@@ -4207,30 +4207,28 @@ async def admin_list(call: CallbackQuery):
 
 
 
+async def handle_root(request):
+    path = os.path.join(os.path.dirname(__file__), "templates", "index.html")
+    try:
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+        return web.Response(text=content, content_type="text/html")
+    except FileNotFoundError:
+        return web.Response(text="<h1>SkittlesMarket</h1>", content_type="text/html")
+
+
 async def handle_info(request):
     uptime = datetime.now() - BOT_START_TIME
     hours, remainder = divmod(int(uptime.total_seconds()), 3600)
     minutes, seconds = divmod(remainder, 60)
-    html = f"""
-    <html>
-    <head><title>SMAILO Bot</title></head>
-    <body style="font-family: monospace; padding: 20px; background: #1a1a1a; color: #0f0;">
-        <h1>🚀 SMAILO Bot Status</h1>
-        <pre>
-╔════════════════════════╗
-║  SMAILO BOT - RUNNING  ║
-╠════════════════════════╣
-║  🕐 Uptime: {hours}h {minutes}m {seconds}s
-╚════════════════════════╝
-        </pre>
-    </body>
-    </html>
-    """
+    html = f"""<html><head><title>SMAILO Bot</title></head><body style="font-family:monospace;padding:20px;background:#1a1a1a;color:#0f0;"><pre>
+SMAILO BOT - RUNNING
+🕐 Uptime: {hours}h {minutes}m {seconds}s</pre></body></html>"""
     return web.Response(text=html, content_type="text/html")
 
 
 app = web.Application()
-app.router.add_get("/", handle_info)
+app.router.add_get("/", handle_root)
 app.router.add_get("/info", handle_info)
 
 
