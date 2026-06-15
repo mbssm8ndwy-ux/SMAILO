@@ -4263,18 +4263,6 @@ async def run_support_bot_wrapper():
     await support_bot.run_support_bot()
 
 
-async def webhook_handle(request):
-    if request.method != "POST":
-        return web.Response(status=405)
-    try:
-        body = await request.json()
-        update = types.Update(**body)
-        await dp.feed_update(bot, update)
-    except Exception:
-        logging.exception("Webhook update error")
-    return web.Response(status=200)
-
-
 async def main() -> None:
     runner = web.AppRunner(app)
     await runner.setup()
@@ -4282,37 +4270,21 @@ async def main() -> None:
     await site.start()
     logging.info(f"Web server started on port {LOCAL_PORT}")
 
-    webhook_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip()
-    if webhook_url:
-        wh = f"{webhook_url.rstrip('/')}/webhook"
-        app.router.add_post("/webhook", webhook_handle)
-        await bot.set_webhook(wh, allowed_updates=dp.resolve_used_update_types())
-        logging.info("Webhook set to %s", wh)
-    else:
-        logging.info("No RENDER_EXTERNAL_URL — using polling")
-        app.router.add_post("/webhook", webhook_handle)
-
     support_task = asyncio.create_task(run_support_bot_wrapper(), name="support_bot")
 
-    if not webhook_url:
-        while True:
-            try:
-                await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-                return
-            except TelegramNetworkError as exc:
-                logging.error("Network error while polling Telegram: %s", exc)
-                await asyncio.sleep(5)
-            finally:
-                support_task.cancel()
-                try:
-                    await support_task
-                except asyncio.CancelledError:
-                    pass
-    else:
+    while True:
         try:
-            await support_task
-        except Exception:
-            logging.exception("Support bot error")
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+            return
+        except TelegramNetworkError as exc:
+            logging.error("Network error while polling Telegram: %s", exc)
+            await asyncio.sleep(5)
+        finally:
+            support_task.cancel()
+            try:
+                await support_task
+            except asyncio.CancelledError:
+                pass
 
 
 if __name__ == "__main__":
