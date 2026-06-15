@@ -520,33 +520,3 @@ def admin_delete_sbp_keyboard(items):
         kb.button(text=f"🗑 [{s['id']}] {short}", callback_data=f"psrm:{s['id']}")
     kb.adjust(1)
     return kb.as_markup()
-
-
-_REVIEWS_PER_PAGE = 5
-
-
-def reviews_month_keyboard(
-    month_key: str,
-    page: int,
-    total_pages: int,
-    prev_month: str | None,
-    next_month: str | None,
-) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    nav = []
-    if page > 1:
-        nav.append(InlineKeyboardButton(text="«", callback_data=f"rvp:{month_key}:{page - 1}"))
-    nav.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="rv:z"))
-    if page < total_pages:
-        nav.append(InlineKeyboardButton(text="»", callback_data=f"rvp:{month_key}:{page + 1}"))
-    if nav:
-        kb.row(*nav)
-    month_nav = []
-    if next_month:
-        month_nav.append(InlineKeyboardButton(text="<<", callback_data=f"rvm:{next_month}"))
-    if prev_month:
-        month_nav.append(InlineKeyboardButton(text=">>", callback_data=f"rvm:{prev_month}"))
-    if month_nav:
-        kb.row(*month_nav)
-    kb.row(InlineKeyboardButton(text="🔙 В меню", callback_data="rv:menu"))
-    return kb.as_markup()
